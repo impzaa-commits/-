@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>หลบพายุ v1</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+ integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<style>
+:root{--bg:#081018;--panel:#101c28;--line:#243747;--text:#eaf4ff;--muted:#9fb1c2;--cyan:#5de1ff;--green:#64e6a2;--yellow:#ffd166;--red:#ff5d73}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between}
+h1{font-size:20px;margin:0}.sub{font-size:12px;color:var(--muted)}
+main{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 66px)}
+.panel{padding:14px;overflow:auto;border-right:1px solid var(--line)} #map{height:100%;width:100%}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}
+button{border:0;border-radius:12px;padding:11px 13px;font-weight:700;cursor:pointer}
+.primary{background:var(--cyan);color:#041016}.danger{background:var(--red);color:white}.ghost{background:#1c2c3a;color:var(--text)}
+.big{width:100%;font-size:16px;padding:14px}
+.metric{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{background:#0a141e;border-radius:12px;padding:10px}
+.label{font-size:11px;color:var(--muted)}.value{font-size:20px;font-weight:800;margin-top:3px}
+.risk{font-size:30px;font-weight:900}.ok{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}
+#status{font-size:12px;color:var(--muted);line-height:1.5}.note{font-size:11px;color:var(--muted);line-height:1.45}
+.range{width:100%}
+@media(max-width:800px){main{display:block;height:auto}.panel{border:0}.mapwrap{height:58vh}#map{height:100%}}
+</style>
+</head>
+<body>
+<header><div><h1>🌪️ หลบพายุ <span class="sub">v1 Prototype</span></h1><div class="sub">ประเมินภัย → เลือกทิศหนี → หาเส้นทางถนน</div></div><div id="clock" class="sub"></div></header>
+<main>
+<section class="panel">
+  <div class="card">
+    <div class="row"><button id="gpsBtn" class="primary grow">📍 ใช้ตำแหน่งของฉัน</button><button id="refreshBtn" class="ghost">↻</button></div>
+    <div id="status" style="margin-top:9px">กด “ใช้ตำแหน่งของฉัน” เพื่อเริ่ม</div>
+  </div>
+
+  <div class="card">
+    <div class="label">ระดับความเสี่ยงรวม</div>
+    <div id="risk" class="risk">—</div>
+    <div class="metric">
+      <div class="box"><div class="label">ฝน / โอกาส</div><div id="rain" class="value">—</div></div>
+      <div class="box"><div class="label">ลม / กระโชก</div><div id="wind" class="value">—</div></div>
+      <div class="box"><div class="label">ทิศลม</div><div id="winddir" class="value">—</div></div>
+      <div class="box"><div class="label">น้ำในลำน้ำ*</div><div id="river" class="value">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><div class="grow"><b>ระยะค้นหาจุดหนี</b><div class="label">ไม่ใช่การรับรองว่าระยะนี้ปลอดภัย</div></div><b><span id="kmLabel">100</span> กม.</b></div>
+    <input id="km" class="range" type="range" min="20" max="200" step="10" value="100"/>
+    <button id="escapeBtn" class="danger big" style="margin-top:10px">🚨 หลบภัย MANUAL</button>
+    <button id="autoBtn" class="ghost big" style="margin-top:8px">🧭 คำนวณทิศและเส้นทางใหม่</button>
+  </div>
+
+  <div class="card">
+    <b>เส้นทางที่เลือก</b>
+    <div class="metric" style="margin-top:8px">
+      <div class="box"><div class="label">ระยะทางถนน</div><div id="routeKm" class="value">—</div></div>
+      <div class="box"><div class="label">เวลาโดยประมาณ</div><div id="routeTime" class="value">—</div></div>
+    </div>
+    <div id="reason" class="note" style="margin-top:9px">ยังไม่ได้คำนวณ</div>
+  </div>
+
+  <div class="card note">
+    <b>แหล่งข้อมูล v1</b><br>
+    Weather: Open‑Meteo · Flood: Open‑Meteo/GloFAS · Roads: OSRM/OpenStreetMap · Map: OpenStreetMap/Leaflet<br><br>
+    *ค่าแม่น้ำเป็น river discharge จากกริด GloFAS ใกล้พิกัด ไม่ใช่ “ความสูงน้ำบนถนน” และอาจไม่ตรงลำน้ำเล็กในพื้นที่
+    <br><br><b>ต้นแบบเท่านั้น:</b> อย่าใช้แทนประกาศอพยพของหน่วยงานรัฐ/ท้องถิ่น
+  </div>
+</section>
+<section class="mapwrap"><div id="map"></div></section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+ integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const $=id=>document.getElementById(id);
+const map=L.map('map').setView([16.8211,100.2659],8);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+ maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+let here=null, hereMarker=null, targetMarker=null, routeLayer=null, windLine=null, weather=null, flood=null;
+const status=t=>$('status').textContent=t;
+const rad=x=>x*Math.PI/180, deg=x=>x*180/Math.PI;
+function destination(lat,lon,bearing,km){
+ const R=6371,d=km/R,b=rad(bearing),p1=rad(lat),l1=rad(lon);
+ const p2=Math.asin(Math.sin(p1)*Math.cos(d)+Math.cos(p1)*Math.sin(d)*Math.cos(b));
+ const l2=l1+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(p1),Math.cos(d)-Math.sin(p1)*Math.sin(p2));
+ return [deg(p2),((deg(l2)+540)%360)-180];
+}
+function compass(d){return ['N','NE','E','SE','S','SW','W','NW'][Math.round(d/45)%8]}
+function riskClass(s){return s>=70?'bad':s>=40?'warn':'ok'}
+function calcRisk(w,f){
+ let s=0;
+ const p=w.precipitation_probability||0, rain=w.precipitation||0, gust=w.wind_gusts_10m||0, wind=w.wind_speed_10m||0;
+ s += Math.min(30,p*.30);
+ s += Math.min(25,rain*5);
+ s += Math.min(25,Math.max(0,gust-25)*.75);
+ s += Math.min(10,Math.max(0,wind-25)*.4);
+ // River discharge is not directly comparable across basins. v1 only adds a small signal if unusually large in absolute terms.
+ const q=f?.daily?.river_discharge?.[0];
+ if(q!=null) s += Math.min(10, Math.max(0, Math.log10(Math.max(q,1))-2)*7);
+ return Math.round(Math.min(100,s));
+}
+async function loadData(){
+ if(!here) return;
+ status('กำลังอ่านข้อมูลฝน ลม และลำน้ำ…');
+ const [lat,lon]=here;
+ const wu=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=precipitation,precipitation_probability,wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=precipitation_probability,precipitation,wind_speed_10m,wind_direction_10m,wind_gusts_10m&forecast_days=1&timezone=auto`;
+ const fu=`https://flood-api.open-meteo.com/v1/flood?latitude=${lat}&longitude=${lon}&daily=river_discharge,river_discharge_max&forecast_days=3`;
+ try{
+   const [wr,fr]=await Promise.all([fetch(wu),fetch(fu)]);
+   if(!wr.ok) throw new Error('Weather API '+wr.status);
+   weather=await wr.json(); flood=fr.ok?await fr.json():null;
+   const w=weather.current;
+   $('rain').textContent=`${w.precipitation ?? 0} mm / ${w.precipitation_probability ?? 0}%`;
+   $('wind').textContent=`${Math.round(w.wind_speed_10m||0)} / ${Math.round(w.wind_gusts_10m||0)} km/h`;
+   $('winddir').textContent=`${Math.round(w.wind_direction_10m||0)}° ${compass(w.wind_direction_10m||0)}`;
+   const q=flood?.daily?.river_discharge?.[0];
+   $('river').textContent=q==null?'ไม่มีข้อมูล':`${q.toFixed(1)} m³/s`;
+   const r=calcRisk(w,flood);
+   $('risk').textContent=`${r}/100 ${r>=70?'สูง':r>=40?'เฝ้าระวัง':'ต่ำ'}`;
+   $('risk').className='risk '+riskClass(r);
+   drawWind(w.wind_direction_10m||0);
+   status('อัปเดตข้อมูลแล้ว · '+new Date().toLocaleTimeString('th-TH'));
+ }catch(e){status('อ่าน API ไม่สำเร็จ: '+e.message)}
+}
+function drawWind(dir){
+ if(windLine) map.removeLayer(windLine);
+ // Meteorological wind direction = direction wind comes FROM. Draw toward its movement direction.
+ const toward=(dir+180)%360, end=destination(here[0],here[1],toward,25);
+ windLine=L.polyline([here,end],{weight:5,dashArray:'8 8'}).addTo(map).bindTooltip('ทิศที่ลมพัดไป');
+}
+async function routeTo(target){
+ if(routeLayer) map.removeLayer(routeLayer);
+ if(targetMarker) map.removeLayer(targetMarker);
+ targetMarker=L.marker(target).addTo(map).bindPopup('จุดหมายหนีเบื้องต้น');
+ const url=`https://router.project-osrm.org/route/v1/driving/${here[1]},${here[0]};${target[1]},${target[0]}?alternatives=true&overview=full&geometries=geojson`;
+ const r=await fetch(url); if(!r.ok) throw new Error('Routing '+r.status);
+ const data=await r.json(); if(data.code!=='Ok'||!data.routes?.length) throw new Error('ไม่พบเส้นทางถนน');
+ const best=data.routes[0];
+ routeLayer=L.geoJSON(best.geometry,{style:{weight:6,opacity:.85}}).addTo(map);
+ map.fitBounds(routeLayer.getBounds(),{padding:[30,30]});
+ $('routeKm').textContent=(best.distance/1000).toFixed(1)+' กม.';
+ const mins=Math.round(best.duration/60); $('routeTime').textContent=mins>=60?`${Math.floor(mins/60)}ชม. ${mins%60}น.`:`${mins} นาที`;
+ return best;
+}
+async function escape(){
+ if(!here){status('ต้องเปิดตำแหน่งก่อน');return}
+ if(!weather) await loadData();
+ if(!weather?.current){status('ยังไม่มีข้อมูลอากาศ');return}
+ const km=+$('km').value, w=weather.current;
+ // Wind blows FROM dir, so candidate escape is primarily crosswind/upwind rather than downwind.
+ const from=w.wind_direction_10m||0;
+ const candidates=[from,(from+90)%360,(from+270)%360,(from+45)%360,(from+315)%360];
+ status('กำลังเทียบจุดหมายหลายทิศและเส้นทางถนน…');
+ let options=[];
+ for(const bearing of candidates){
+   const t=destination(here[0],here[1],bearing,km);
+   try{
+     const wu=`https://api.open-meteo.com/v1/forecast?latitude=${t[0]}&longitude=${t[1]}&current=precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m&timezone=auto`;
+     const wr=await fetch(wu); if(!wr.ok) continue;
+     const wd=(await wr.json()).current;
+     const localRisk=calcRisk({...wd,wind_direction_10m:bearing},null);
+     options.push({bearing,target:t,risk:localRisk});
+   }catch(e){}
+ }
+ if(!options.length){status('เทียบพื้นที่ปลายทางไม่ได้');return}
+ options.sort((a,b)=>a.risk-b.risk);
+ // Try safest candidates until road route succeeds.
+ for(const o of options){
+   try{
+     await routeTo(o.target);
+     $('reason').textContent=`เลือกทิศ ${Math.round(o.bearing)}° (${compass(o.bearing)}) เพราะค่าพยากรณ์ที่จุดประมาณ ${km} กม. มีคะแนนเสี่ยงต่ำกว่าตัวเลือกที่ตรวจสอบ และหลีกเลี่ยงการหนีตามทิศที่ลมกำลังพัดไป จากนั้น OSRM เลือกเส้นทางถนนที่เร็ว`;
+     status('คำนวณเส้นทางหลบภัยเบื้องต้นแล้ว');
+     return;
+   }catch(e){}
+ }
+ status('พบพื้นที่ปลายทาง แต่หาเส้นทางถนนไม่ได้');
+}
+function locate(){
+ status('กำลังขอตำแหน่ง GPS…');
+ navigator.geolocation.getCurrentPosition(async p=>{
+   here=[p.coords.latitude,p.coords.longitude];
+   if(hereMarker) map.removeLayer(hereMarker);
+   hereMarker=L.circleMarker(here,{radius:9,weight:3,fillOpacity:.9}).addTo(map).bindPopup('ตำแหน่งปัจจุบัน').openPopup();
+   map.setView(here,11); await loadData();
+ },e=>status('ใช้ GPS ไม่ได้: '+e.message),{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+}
+function loadSharedLocation(){
+ const p=new URLSearchParams(location.search);
+ const lat=Number(p.get('lat')), lon=Number(p.get('lon'));
+ if(Number.isFinite(lat)&&Number.isFinite(lon)&&Math.abs(lat)<=90&&Math.abs(lon)<=180){
+   here=[lat,lon];
+   if(hereMarker) map.removeLayer(hereMarker);
+   hereMarker=L.circleMarker(here,{radius:9,weight:3,fillOpacity:.9}).addTo(map).bindPopup(p.get('name')||'ตำแหน่งจากหน้าหลัก').openPopup();
+   map.setView(here,11);
+   loadData();
+   return true;
+ }
+ return false;
+}
+$('gpsBtn').onclick=locate;$('refreshBtn').onclick=loadData;$('escapeBtn').onclick=escape;$('autoBtn').onclick=escape;
+$('km').oninput=e=>$('kmLabel').textContent=e.target.value;
+setInterval(()=>$('clock').textContent=new Date().toLocaleString('th-TH'),1000);
+loadSharedLocation();
+</script>
+</body></html>
