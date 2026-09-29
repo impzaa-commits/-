@@ -1,1 +1,78 @@
+name: Publish site with water data
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: water-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Update the shared water snapshot
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          from pathlib import Path
+
+          target = Path('water-level.json')
+          url = 'https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load'
+          try:
+              request = urllib.request.Request(url, headers={'User-Agent': 'FonMaiMai-Water-Update/1.0'})
+              with urllib.request.urlopen(request, timeout=25) as response:
+                  data = json.load(response)
+              rows = data.get('waterlevel_data', {}).get('data', [])
+              if not isinstance(rows, list) or not rows:
+                  raise ValueError('ThaiWater returned no station rows')
+              compact = []
+              for row in rows:
+                  station = row.get('station') or {}
+                  compact.append({
+                      'waterlevel_msl': row.get('waterlevel_msl'),
+                      'waterlevel_msl_previous': row.get('waterlevel_msl_previous'),
+                      'waterlevel_datetime': row.get('waterlevel_datetime'),
+                      'station': {key: station.get(key) for key in (
+                          'tele_station_lat', 'tele_station_long', 'tele_station_name',
+                          'tele_station_oldcode', 'min_bank', 'ground_level')},
+                  })
+              target.write_text(json.dumps({'at': int(time.time() * 1000), 'rows': compact},
+                                           ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+              print(f'Updated {len(compact)} water stations')
+          except Exception as error:
+              print(f'ThaiWater unavailable: {error}; keeping the previous snapshot')
+              if not target.exists():
+                  raise
+          PY
+      - name: Save snapshot for the next scheduled run
+        run: |
+          git add water-level.json
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Update water level snapshot'
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: '.'
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
