@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>เก็บผ้าทันไหม๊ — เรดาร์ฝนตามตำแหน่ง</title>
+  <link rel="preconnect" href="https://tiles.openfreemap.org">
+  <link rel="preconnect" href="https://api.rainviewer.com">
+  <link rel="preconnect" href="https://api.open-meteo.com">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.7.1/dist/maplibre-gl.css">
+  <script src="https://unpkg.com/maplibre-gl@5.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    :root{
+      --bg:#07131c; --panel:#0c1d29; --panel2:#102734; --line:#1d4152;
+      --text:#eefbff; --muted:#8db5c7; --cyan:#39d7ff; --green:#63e7aa;
+      --yellow:#ffd76a; --orange:#ff9b3d; --red:#ff6b79;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--text)}
+    body{overflow:hidden}
+    .app{height:100%;display:grid;grid-template-rows:auto auto 1fr}
+    header{min-height:68px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid #173342;background:#081722}
+    .rainSignal{display:flex;align-items:center;gap:14px;padding:14px 22px;background:#081722;border-bottom:1px solid #244555}
+    .lamp{flex:none;width:42px;height:42px;border-radius:50%;background:radial-gradient(circle at 32% 25%,#abb8c1,#455362 65%);border:3px solid #233b49}
+    .rainSignal.green .lamp{background:radial-gradient(circle at 32% 25%,#e1ffed,#23d779 65%);box-shadow:0 0 22px #23d77988}
+    .rainSignal.red .lamp{background:radial-gradient(circle at 32% 25%,#ffe5e5,#ff4058 65%);box-shadow:0 0 22px #ff405888}
+    .rainSignal b{display:block;font-size:17px}
+    .waterSignal{display:flex;align-items:center;gap:14px;padding:14px 17px;background:#0a1d28;border:1px solid #244555;border-radius:12px;margin-bottom:12px}
+    .waterDrop{flex:none;width:34px;height:42px;position:relative;transform:rotate(45deg);border-radius:52% 48% 55% 45%;background:#53636d;border:2px solid #71838d;box-shadow:inset 4px 4px 8px #ffffff22}
+    .waterDrop::after{content:'';position:absolute;width:11px;height:11px;border-radius:50%;background:#ffffff77;left:6px;top:6px}
+    .waterSignal.green .waterDrop{background:var(--green);border-color:#a7ffd0;box-shadow:0 0 20px #63e7aa66,inset 4px 4px 8px #ffffff55}
+    .waterSignal.yellow .waterDrop{background:var(--yellow);border-color:#fff0ad;box-shadow:0 0 20px #ffd76a66,inset 4px 4px 8px #ffffff55}
+    .waterSignal.orange .waterDrop{background:var(--orange);border-color:#ffd1a3;box-shadow:0 0 20px #ff9b3d66,inset 4px 4px 8px #ffffff55}
+    .waterSignal.red .waterDrop{background:var(--red);border-color:#ffc0c6;box-shadow:0 0 20px #ff6b7966,inset 4px 4px 8px #ffffff55}
+    .waterSignal b{display:block;font-size:17px}
+    header{gap:12px;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
+    .brand{display:flex;align-items:center;gap:12px;font-size:22px;font-weight:800}
+    .logo{width:36px;height:36px;border:2px solid var(--cyan);border-radius:12px;display:grid;place-items:center;color:var(--cyan)}
+    .status{font-size:13px;color:var(--muted)}
+    main{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;padding:14px}
+    .left,.card{background:linear-gradient(180deg,#0c1d29,#091923);border:1px solid #173747;border-radius:18px;overflow:hidden}
+    .left{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+    .maphead{display:flex;align-items:end;justify-content:space-between;padding:16px 18px 12px;gap:12px}
+    .mapActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .eyebrow{font-size:12px;font-weight:800;color:var(--cyan);letter-spacing:.08em}
+    h1,h2,p{margin:0}
+    h1{font-size:20px;margin-top:4px}
+    .mapwrap{position:relative;min-height:0;margin:0 16px;border:1px solid #24495b;border-radius:14px;overflow:hidden;background:#10202a}
+    #map{position:absolute;inset:0}
+    .mapError{display:none;position:absolute;inset:16px;z-index:20;align-items:center;justify-content:center;text-align:center;padding:30px;background:#0a1720e8;border:1px solid #864553;border-radius:12px;color:#ffdce0}
+    .mapError.show{display:flex}
+    .legend{position:absolute;right:10px;bottom:10px;z-index:5;background:#07141dcc;border:1px solid #2a4d5e;border-radius:10px;padding:8px 10px;font-size:11px}
+    .legendbar{height:7px;width:150px;border-radius:10px;background:linear-gradient(90deg,#48b6ff,#39ef9d,#f5e84a,#ff9b3d,#ff4c66,#bd3dff);margin-top:5px}
+    .controls{padding:12px 16px 16px}
+    .row{display:flex;align-items:center;gap:12px}
+    button,.escapeBtn{border:1px solid #31586a;background:#153346;color:#fff;border-radius:10px;padding:10px 13px;font-weight:700;cursor:pointer;text-decoration:none;font-size:14px}
+    button:hover{background:#1b4259}
+    button.primary{background:#0d6680;border-color:#2bbdde}
+    button:disabled{opacity:.5;cursor:default}
+    input[type="range"]{width:100%;accent-color:#54dbf6}
+    .timeLabel{min-width:96px;text-align:right;font-variant-numeric:tabular-nums;color:#c9e5ef}
+    .side{
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  padding-right:6px
+}
+.side > *{
+  flex-shrink:0
+}
+    .card{padding:17px}
+    .card h2{font-size:17px;margin:2px 0 12px}
+    .place{display:inline-block;padding:8px 11px;border-radius:11px;background:#132c38;border:1px solid #294b5b;font-weight:800;margin-bottom:10px}
+    .manualLocation{border:1px solid #294b5b;border-radius:11px;padding:11px;margin:0 0 12px;background:#0b222d}
+    .manualLocation .row{gap:8px;flex-wrap:wrap}
+    .manualLocation label{display:block;flex:1 1 105px;font-size:12px;color:#c6e3ed}
+    .manualLocation input{width:100%;margin-top:4px;background:#0a1b25;color:white;border:1px solid #315364;border-radius:8px;padding:8px;font-size:14px}
+    .manualLocation button{flex:1 1 auto}
+    .localClock{flex:1 1 180px;min-height:42px;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 10px;background:#0a1b25;border:1px solid #315364;border-radius:10px;color:#e9faff;font-variant-numeric:tabular-nums;text-align:center}
+    .localClock .clockLabel{font-size:11px;color:var(--muted);white-space:nowrap}
+    .localClock b{font-size:13px;font-weight:800;line-height:1.25}
+    #mapPickBtn.active{background:#0d6680;border-color:#54dbf6}
+    .mapwrap.picking #map{cursor:crosshair}
+    .verdict{border:1px solid #2f6756;background:#103429;border-radius:12px;padding:13px;margin-bottom:12px}
+    .verdict.warn{border-color:#80652c;background:#3a2c10}
+    .verdict.danger{border-color:#87414c;background:#38141a}
+    .big{font-size:19px;font-weight:900}
+    .small{font-size:12px;color:var(--muted);line-height:1.5}
+    .metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}
+    .metric{background:#0c202b;border:1px solid #244555;border-radius:11px;padding:11px}
+    .metric b{display:block;font-size:19px;margin-top:2px}
+    .forecast{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:10px}
+    .slot{background:#0c202b;border:1px solid #244555;border-radius:10px;padding:9px 6px;text-align:center;font-size:11px}
+    .slot b{display:block;font-size:15px;margin:4px 0}
+    .settings label{display:block;font-size:12px;color:#c6e3ed;margin-bottom:6px}
+    .settings input[type="number"]{width:100%;background:#0a1b25;color:white;border:1px solid #315364;border-radius:9px;padding:10px;font-size:15px}
+    .settingRow{display:grid;grid-template-columns:1fr 120px;gap:9px;align-items:end}
+    .footnote{padding:0 3px 8px;font-size:11px;color:#6f96a6;line-height:1.5}
+    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#5ce7a9;margin-right:6px}
+    .dot.bad{background:#ff6b79}
+    .loading{animation:pulse 1.2s infinite alternate}@keyframes pulse{to{opacity:.45}}
+    @media(max-width:900px){
+      body{overflow:auto}.app{height:auto;min-height:100%} main{grid-template-columns:1fr}.left{height:75vh}.side{overflow:visible}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div id="rainSignal" class="rainSignal" role="status" aria-live="polite"><span class="lamp" aria-hidden="true"></span><div><b id="signalTitle">กำลังหาตำแหน่ง GPS…</b><div id="signalDetail" class="small">ประเมินฝนใน 1 ชั่วโมงข้างหน้า</div></div></div>
+  <header>
+    <div class="brand"><div class="logo">☔</div><span>เก็บผ้าทันไหม๊</span></div>
+    <div class="status"><span id="liveDot" class="dot"></span><span id="topStatus">กำลังโหลดข้อมูลล่าสุด…</span></div>
+  </header>
+
+  <main>
+    <section class="left">
+      <div class="maphead">
+        <div><div class="eyebrow">เรดาร์ฝนย้อนหลัง</div><h1>ดูแนวฝนเคลื่อนตัว</h1></div>
+        <div class="mapActions">
+          <a id="stormEscapeBtn" class="escapeBtn" href="./storm-escape.html">↗ ทางหนีพายุ</a>
+          <button id="locateBtn">◎ ตำแหน่งฉัน</button>
+        </div>
+      </div>
+
+      <div class="mapwrap">
+        <div id="map"></div>
+        <div id="mapError" class="mapError">
+          <div><b>โหลดแผนที่ไม่สำเร็จ</b><br><span class="small">เช็กอินเทอร์เน็ต แล้วกด F5 อีกครั้ง<br>เวอร์ชันนี้ไม่ได้เรียก tile.openstreetmap.org โดยตรง</span></div>
+        </div>
+        <div class="legend">ฝนเบา → หนัก<div class="legendbar"></div></div>
+      </div>
+
+      <div class="controls">
+        <div class="row">
+          <button id="playBtn" class="primary">▶ เล่น</button>
+          <input id="timeline" type="range" min="0" max="0" value="0" step="1">
+          <div id="frameTime" class="timeLabel">--:--</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="card">
+        <div class="eyebrow">ประเมิน 2 ชั่วโมงข้างหน้า</div>
+        <h2>พื้นที่ที่ติดตาม</h2>
+        <div class="place" id="placeName">กำลังหาตำแหน่ง…</div><div id="locationStatus" class="small" style="margin-bottom:10px">โปรดอนุญาตการเข้าถึงตำแหน่งบนมือถือ</div>
+        <div class="manualLocation">
+          <div class="small" style="margin-bottom:8px">คอมพิวเตอร์ไม่มี GPS หรือระบุตำแหน่งผิด? เลือกจุดเองได้</div>
+          <div class="row">
+            <button id="mapPickBtn" type="button">◎ เลือกจุดบนแผนที่</button>
+            <div id="localClock" class="localClock" title="วันและเวลาท้องถิ่นของพื้นที่ที่เลือก">
+              <span class="clockLabel">เวลาท้องถิ่น</span><b id="localDateTime">--</b>
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label>ละติจูด<input id="manualLat" type="number" step="any" min="-90" max="90" placeholder="16.8211"></label>
+            <label>ลองจิจูด<input id="manualLon" type="number" step="any" min="-180" max="180" placeholder="100.2659"></label>
+            <button id="manualApplyBtn" type="button">ใช้พิกัดนี้</button>
+          </div>
+        </div>
+        <div id="verdict" class="verdict"><div class="big">กำลังประเมิน…</div><div class="small">ดึงพยากรณ์ฝนและลม</div></div>
+        <div class="metrics">
+          <div class="metric"><span class="small">โอกาสฝนสูงสุด</span><b id="rainProb">--%</b></div>
+          <div class="metric"><span class="small">โอกาสพายุฝนฟ้าคะนอง</span><b id="stormProb">--%</b></div>
+          <div class="metric"><span class="small">ฝนรวม 2 ชม.</span><b id="rainSum">-- มม.</b></div>
+          <div class="metric"><span class="small">CAPE สูงสุด</span><b id="capeMax">-- J/kg</b></div>
+        </div>
+        <div id="forecast" class="forecast"></div>
+        <div class="small" style="margin-top:10px">อัปเดตพยากรณ์ล่าสุด <span id="forecastUpdated">--:--</span></div>
+      </section>
+
+      <section class="card">
+        <div class="eyebrow">สถานะน้ำ / น้ำท่วม</div>
+        <h2 id="waterHeading">ระดับน้ำใกล้ตำแหน่งปัจจุบัน</h2>
+        <div id="waterSignal" class="waterSignal" role="status" aria-live="polite">
+          <span class="waterDrop" aria-hidden="true"></span>
+          <div><b id="waterTitle">กำลังโหลดข้อมูลระดับน้ำ…</b><div id="waterDetail" class="small">กำลังเลือกแหล่งข้อมูลตามประเทศ</div></div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><span id="waterMetricLabel" class="small">ระดับน้ำสถานี</span><b id="waterLevel">--</b></div>
+          <div class="metric"><span id="waterTrendLabel" class="small">แนวโน้ม</span><b id="waterTrend">--</b></div>
+        </div>
+        <div id="waterTimeNote" class="small" style="margin-top:10px">เวลาอ่านค่า <span id="waterUpdated">--</span></div>
+        <div id="waterSourceNote" class="small" style="margin-top:8px">ระบบเลือกแหล่งข้อมูลน้ำตามพิกัดอัตโนมัติ • <a id="waterSourceLink" href="https://www.thaiwater.net/" target="_blank" rel="noopener noreferrer" style="color:#7de8ff">ต้นทางข้อมูล ↗</a></div>
+      </section>
+
+      <section class="card settings">
+        <div class="eyebrow">ตั้งเกณฑ์เตือน</div>
+        <h2>เตือนเมื่อฝนมีแนวโน้มสูง</h2>
+        <div class="settingRow">
+          <div><label>โอกาสฝนอย่างน้อย (%)</label><input id="threshold" type="number" min="10" max="100" value="60"></div>
+          <button id="notifyBtn">เปิดแจ้งเตือน</button>
+        </div>
+        <div class="small" style="margin-top:10px">ระบบจะประเมินใหม่ทุก 10 นาทีเมื่อหน้านี้เปิดอยู่</div>
+      </section>
+
+      <section class="card">
+        <div class="eyebrow">สถานะระบบ</div>
+        <h2>แหล่งข้อมูล</h2>
+        <div class="small">
+          แผนที่ฐาน: OpenFreeMap / MapLibre<br>
+          เรดาร์ฝนย้อนหลัง: RainViewer<br>
+          พยากรณ์ 2 ชั่วโมง: Open‑Meteo<br>
+          สถานะน้ำ: ไทย—ThaiWater / ฝรั่งเศส—Hub’Eau + Vigicrues / UAE—Open‑Meteo Flood (GloFAS)<br>
+          พายุฝนฟ้าคะนอง: ประเมินจาก CAPE + โอกาสฝน + ลมกระโชก + weather code
+        </div>
+      </section>
+
+      <div class="footnote">
+        การประเมินนี้เป็นตัวช่วยตัดสินใจ ไม่ใช่ประกาศเตือนภัยทางการ • ฝรั่งเศสใช้ระดับน้ำ Hub’Eau และระดับเฝ้าระวัง Vigicrues • UAE ใช้แบบจำลอง GloFAS + พยากรณ์ฝน ไม่ใช่สถานีวัดน้ำจริง • ค่า “โอกาสพายุฝนฟ้าคะนอง” เป็นคะแนนประเมินจากแบบจำลอง ไม่ใช่เปอร์เซ็นต์เตือนภัยทางการ • เรดาร์ RainViewer รุ่นฟรีแสดงข้อมูลย้อนหลัง ไม่ใช่ภาพเรดาร์อนาคต
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+(() => {
+  const DEFAULT = { lat: 16.8211, lon: 100.2659, name: "พิษณุโลก" };
+  const REFRESH_MS = 10 * 60 * 1000;
+  let point = {...DEFAULT};
+  const MANUAL_LOCATION_KEY='fonmaimai-manual-location-v1';
+  let forecastRequest = 0, locationReady = false, gpsWatch = null, gpsSession = 0, pickingMap = false, manualLocation = false, lastForecast = null;
+  let waterRequest = 0;
+  let waterRowsPromise = null, waterRowsCache = null, waterRetryAt = 0;
+  let franceVigiCache = null, franceVigiAt = 0;
+  let map, marker, frames = [], frameIndex = 0, timer = null, playing = false;
+  let radarSourceId = null, radarLayerId = null;
+  let activeTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  const $ = id => document.getElementById(id);
+  const areaTime = d => {
+    try{
+      return new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:activeTimeZone}).format(d);
+    }catch(_){
+      return new Intl.DateTimeFormat('th-TH',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'UTC'}).format(d);
+    }
+  };
+  function updateLocalClock(){
+    const el=$('localDateTime');
+    if(!el) return;
+    try{
+      const text=new Intl.DateTimeFormat('th-TH',{
+        day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',
+        hour12:false,timeZone:activeTimeZone,timeZoneName:'short'
+      }).format(new Date());
+      el.textContent=text;
+      $('localClock').title='วันและเวลาท้องถิ่น • '+activeTimeZone;
+    }catch(_){
+      el.textContent=new Date().toLocaleString('th-TH');
+    }
+  }
+  function setActiveTimeZone(zone){
+    if(typeof zone==='string' && zone.trim()) activeTimeZone=zone;
+    updateLocalClock();
+    if(frames.length && Number.isFinite(frameIndex)) showRadarFrame(frameIndex);
+  }
+
+  function setStatus(text, ok=true){
+    $('topStatus').textContent = text;
+    $('liveDot').classList.toggle('bad', !ok);
+  }
+
+  function initMap(){
+    try {
+      map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        center: [point.lon, point.lat],
+        zoom: 7.3,
+        attributionControl: true
+      });
+      map.addControl(new maplibregl.NavigationControl({showCompass:false}), 'top-left');
+      map.on('load', async () => {
+        marker = new maplibregl.Marker({color:'#1ed5ff'}).setLngLat([point.lon,point.lat]).addTo(map);
+        $('mapError').classList.remove('show');
+        await loadRadar();
+      });
+      map.on('error', ev => {
+        const msg = String(ev?.error?.message || '');
+        if(msg && /style|source|tile|fetch/i.test(msg)) $('mapError').classList.add('show');
+      });
+    } catch(e) {
+      console.error(e); $('mapError').classList.add('show'); setStatus('แผนที่โหลดไม่สำเร็จ', false);
+    }
+  }
+
+  async function loadRadar(){
+    try{
+      const r = await fetch('https://api.rainviewer.com/public/weather-maps.json', {cache:'no-store'});
+      if(!r.ok) throw new Error('RainViewer '+r.status);
+      const data = await r.json();
+      frames = (data.radar?.past || []).map(f => ({
+        ...f,
+        url: `${data.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`
+      }));
+      if(!frames.length) throw new Error('ไม่มีเฟรมเรดาร์');
+      $('timeline').max = frames.length - 1;
+      frameIndex = frames.length - 1;
+      $('timeline').value = frameIndex;
+      showRadarFrame(frameIndex);
+      setStatus(`เรดาร์ ${frames.length} เฟรม • อัปเดตแล้ว`);
+    }catch(e){
+      console.error(e);
+      setStatus('โหลดเรดาร์ไม่สำเร็จ แต่แผนที่ยังใช้งานได้', false);
+    }
+  }
+
+  function showRadarFrame(i){
+    if(!map || !map.isStyleLoaded() || !frames[i]) return;
+    frameIndex = i;
+    const f = frames[i];
+    $('frameTime').textContent = areaTime(new Date(f.time * 1000));
+
+    if(radarLayerId && map.getLayer(radarLayerId)) map.removeLayer(radarLayerId);
+    if(radarSourceId && map.getSource(radarSourceId)) map.removeSource(radarSourceId);
+
+    radarSourceId = 'radar-src';
+    radarLayerId = 'radar-layer';
+    map.addSource(radarSourceId, {
+      type:'raster',
+      tiles:[f.url],
+      tileSize:256,
+      maxzoom:7,
+      attribution:'Radar © RainViewer'
+    });
+    map.addLayer({
+      id:radarLayerId,
+      type:'raster',
+      source:radarSourceId,
+      paint:{'raster-opacity':0.72,'raster-fade-duration':0}
+    });
+  }
+
+  function stopPlay(){
+    playing=false; clearInterval(timer); timer=null; $('playBtn').textContent='▶ เล่น';
+  }
+  function startPlay(){
+    if(frames.length < 2) return;
+    playing=true; $('playBtn').textContent='⏸ หยุด';
+    timer=setInterval(()=>{
+      frameIndex=(frameIndex+1)%frames.length;
+      $('timeline').value=frameIndex;
+      showRadarFrame(frameIndex);
+    },700);
+  }
+
+  function setSignal(state, title, detail){
+    $('rainSignal').className='rainSignal '+state;
+    $('signalTitle').textContent=title;
+    $('signalDetail').textContent=detail;
+  }
+
+  function setWaterSignal(state, title, detail, level='--', trend='--', updated='--'){
+    $('waterSignal').className='waterSignal '+state;
+    $('waterTitle').textContent=title;
+    $('waterDetail').textContent=detail;
+    $('waterLevel').textContent=level;
+    $('waterTrend').textContent=trend;
+    $('waterUpdated').textContent=updated;
+  }
+
+  function setWaterUi(mode){
+    const link=$('waterSourceLink');
+    if(mode==='th'){
+      $('waterHeading').textContent='ระดับน้ำใกล้ตำแหน่งปัจจุบัน';
+      $('waterMetricLabel').textContent='ระดับน้ำสถานี (เทียบระดับทะเล)';
+      $('waterTrendLabel').textContent='แนวโน้ม';
+      $('waterTimeNote').firstChild.textContent='เวลาอ่านค่าที่สถานี ';
+      $('waterSourceNote').childNodes[0].textContent='ระดับน้ำในแม่น้ำไม่ใช่ความลึกน้ำที่ถนนหรือจุดที่คุณอยู่ • สถานีใกล้สุดอาจอยู่คนละลำน้ำ • ';
+      link.href='https://www.thaiwater.net/'; link.textContent='ต้นทาง ThaiWater ↗';
+    }else if(mode==='fr'){
+      $('waterHeading').textContent='ระดับน้ำและเฝ้าระวังน้ำหลากใกล้ตำแหน่ง';
+      $('waterMetricLabel').textContent='ระดับน้ำที่สถานี';
+      $('waterTrendLabel').textContent='แนวโน้ม';
+      $('waterTimeNote').firstChild.textContent='เวลาอ่านค่าที่สถานี ';
+      $('waterSourceNote').childNodes[0].textContent='ระดับน้ำ Hub’Eau เป็นความสูงที่จุดวัด ไม่ใช่ความลึกน้ำบนถนน • สีหยดน้ำอ้างระดับเฝ้าระวัง Vigicrues เมื่อมีเส้นทางน้ำเฝ้าระวังใกล้พิกัด • ';
+      link.href='https://www.vigicrues.gouv.fr/'; link.textContent='Vigicrues / Hub’Eau ↗';
+    }else if(mode==='ae'){
+      $('waterHeading').textContent='สัญญาณน้ำหลาก / น้ำท่วมจากแบบจำลอง';
+      $('waterMetricLabel').textContent='การไหลของน้ำแบบจำลอง';
+      $('waterTrendLabel').textContent='แนวโน้ม 24 ชม.';
+      $('waterTimeNote').firstChild.textContent='วันที่แบบจำลอง ';
+      $('waterSourceNote').childNodes[0].textContent='UAE ไม่มีสถานีแม่น้ำสาธารณะรูปแบบเดียวกับไทยในระบบนี้ • ค่านี้ใช้ GloFAS ความละเอียดราว 5 กม. + พยากรณ์ฝน จึงเป็นสัญญาณช่วยเฝ้าระวัง ไม่ใช่ระดับน้ำจริงที่ถนน • ';
+      link.href='https://www.ncm.gov.ae/'; link.textContent='ประกาศทางการ UAE NCM ↗';
+    }else{
+      $('waterHeading').textContent='สถานะน้ำ / น้ำท่วม';
+      $('waterMetricLabel').textContent='ข้อมูลน้ำ';
+      $('waterTrendLabel').textContent='แนวโน้ม';
+      $('waterTimeNote').firstChild.textContent='เวลาอัปเดต ';
+      $('waterSourceNote').childNodes[0].textContent='ประเทศนี้ยังไม่ได้เชื่อมแหล่งข้อมูลน้ำเฉพาะพื้นที่ • ';
+      link.href='https://open-meteo.com/en/docs/flood-api'; link.textContent='Global Flood API ↗';
+    }
+  }
+
+  const WATER_URL='https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load';
+  const WATER_PUBLISHED_URL='./water-level.json';
+  const WATER_CACHE_KEY='fonmaimai-water-cache-v1', WATER_RETRY_KEY='fonmaimai-water-retry-v1';
+  const WATER_CACHE_MS=30*60*1000, WATER_MAX_AGE_MS=3*60*60*1000;
+  function waterError(error){
+    if(error?.name==='TimeoutError' || error?.name==='AbortError') return 'หมดเวลาเชื่อมต่อ';
+    if(error?.name==='TypeError') return 'เชื่อมต่อไม่ได้ (เครือข่าย/CORS)';
+    return error?.message || 'ข้อผิดพลาดไม่ทราบสาเหตุ';
+  }
+  function readWaterCache(){
+    try{
+      const saved=JSON.parse(localStorage.getItem(WATER_CACHE_KEY));
+      if(Number.isFinite(saved?.at) && Array.isArray(saved?.rows) && saved.rows.length &&
+        (!waterRowsCache || saved.at>waterRowsCache.at))
+        waterRowsCache=saved;
+      waterRetryAt=Math.max(waterRetryAt,Number(localStorage.getItem(WATER_RETRY_KEY))||0);
+    }catch(e){console.warn('อ่านข้อมูลน้ำที่บันทึกไว้ไม่ได้',e);}
+    return waterRowsCache;
+  }
+  function compactWaterRows(rows){
+    return rows.map(row=>({
+      waterlevel_msl:row.waterlevel_msl,
+      waterlevel_msl_previous:row.waterlevel_msl_previous,
+      waterlevel_datetime:row.waterlevel_datetime,
+      station:{
+        tele_station_lat:row.station?.tele_station_lat,
+        tele_station_long:row.station?.tele_station_long,
+        tele_station_name:row.station?.tele_station_name,
+        tele_station_oldcode:row.station?.tele_station_oldcode,
+        min_bank:row.station?.min_bank,
+        ground_level:row.station?.ground_level
+      }
+    }));
+  }
+  function rateLimitWait(response){
+    const header=response.headers?.get('Retry-After');
+    const seconds=Number(header);
+    const until=Number.isFinite(seconds) && header ? Date.now()+seconds*1000 : Date.parse(header);
+    return Math.min(2*60*60*1000,Math.max(15*60*1000,Number.isFinite(until)?until-Date.now():30*60*1000));
+  }
+  function limitedWaterError(){
+    const minutes=Math.max(1,Math.ceil((waterRetryAt-Date.now())/60000));
+    const error=new Error('ThaiWater จำกัดคำขอ (HTTP 429) • ระบบจะลองใหม่ในประมาณ '+minutes+' นาที');
+    error.rateLimited=true;
+    return error;
+  }
+  async function fetchWaterRows(){
+    const cache=readWaterCache(), now=Date.now();
+    if(cache && now-cache.at<WATER_CACHE_MS) return {...cache,cached:true,limited:now<waterRetryAt};
+    if(waterRowsPromise) return waterRowsPromise;
+    waterRowsPromise=(async()=>{
+      try{
+        // A GitHub Pages snapshot lets every visitor share one upstream request per update.
+        try{
+          const published=await fetch(WATER_PUBLISHED_URL,{cache:'no-store',signal:AbortSignal.timeout(8000)});
+          if(published.ok){
+            const snapshot=await published.json();
+            if(Number.isFinite(snapshot?.at) && Array.isArray(snapshot?.rows) && snapshot.rows.length &&
+              Date.now()-snapshot.at>=0 && Date.now()-snapshot.at<WATER_MAX_AGE_MS){
+              if(!waterRowsCache || snapshot.at>waterRowsCache.at){
+                waterRowsCache=snapshot;
+                try{localStorage.setItem(WATER_CACHE_KEY,JSON.stringify(snapshot));}catch(e){console.warn('บันทึกข้อมูลน้ำไม่ได้',e);}
+              }
+              return {...waterRowsCache,cached:true,published:true};
+            }
+          }
+        }catch(error){console.warn('ยังไม่มีข้อมูลน้ำที่เผยแพร่ไว้',error);}
+        if(Date.now()<waterRetryAt) throw limitedWaterError();
+        const response=await fetch(WATER_URL,{cache:'no-store',signal:AbortSignal.timeout(20000)});
+        if(response.status===429){
+          waterRetryAt=Date.now()+rateLimitWait(response);
+          try{localStorage.setItem(WATER_RETRY_KEY,String(waterRetryAt));}catch(e){console.warn('บันทึกเวลาพักไม่ได้',e);}
+          throw limitedWaterError();
+        }
+        if(!response.ok) throw new Error('HTTP '+response.status);
+        const json=await response.json();
+        const rows=json?.waterlevel_data?.data;
+        if(!Array.isArray(rows) || !rows.length) throw new Error('ข้อมูลว่างหรือรูปแบบเปลี่ยน');
+        waterRowsCache={at:Date.now(),rows:compactWaterRows(rows)};
+        waterRetryAt=0;
+        try{
+          localStorage.setItem(WATER_CACHE_KEY,JSON.stringify(waterRowsCache));
+          localStorage.removeItem(WATER_RETRY_KEY);
+        }catch(e){console.warn('บันทึกข้อมูลน้ำไม่ได้',e);}
+        return {...waterRowsCache,cached:false};
+      }catch(error){
+        if(waterRowsCache && Date.now()-waterRowsCache.at<WATER_MAX_AGE_MS)
+          return {...waterRowsCache,cached:true,limited:!!error.rateLimited};
+        throw error;
+      }finally{waterRowsPromise=null;}
+    })();
+    return waterRowsPromise;
+  }
+  const finiteNumber=v => v===null || v===undefined || v==='' ? NaN : Number(v);
+  function stationTime(value){
+    // ThaiWater sends Thailand local time without a timezone suffix.
+    if(typeof value!=='string' || !/^\d{4}-\d\d-\d\d \d\d:\d\d/.test(value)) return NaN;
+    return Date.parse(value.replace(' ','T')+'+07:00');
+  }
+  function distanceKm(a,b,c,d){
+    const rad=Math.PI/180, x=(c-a)*rad, y=(d-b)*rad;
+    const h=Math.sin(x/2)**2+Math.cos(a*rad)*Math.cos(c*rad)*Math.sin(y/2)**2;
+    return 12742*Math.asin(Math.sqrt(h));
+  }
+  function waterCountry(p){
+    // Lightweight coordinate routing: enough for Thailand, metropolitan France/Corsica and UAE.
+    if(p.lat>=5.4 && p.lat<=20.6 && p.lon>=97.0 && p.lon<=105.8) return 'th';
+    if(p.lat>=41.0 && p.lat<=51.7 && p.lon>=-5.6 && p.lon<=10.0) return 'fr';
+    if(p.lat>=22.4 && p.lat<=26.7 && p.lon>=51.3 && p.lon<=56.7) return 'ae';
+    return 'other';
+  }
+
+  function waterTrendText(deltaCm){
+    if(!Number.isFinite(deltaCm)) return 'ไม่มีค่าก่อนหน้า';
+    const n=Math.abs(Math.round(deltaCm));
+    return deltaCm>0?'↑ เพิ่ม '+n+' ซม.':deltaCm<0?'↓ ลด '+n+' ซม.':'→ คงที่';
+  }
+
+  async function loadThaiWater(request,here){
+    setWaterUi('th');
+    setWaterSignal('', 'กำลังโหลดข้อมูลระดับน้ำ…', 'ค้นหาสถานี ThaiWater ใกล้ตำแหน่งที่แสดง');
+    const water=await fetchWaterRows(), rows=water.rows;
+    const stations=rows.map(row=>{
+      const lat=finiteNumber(row.station?.tele_station_lat),lon=finiteNumber(row.station?.tele_station_long);
+      const level=finiteNumber(row.waterlevel_msl), time=stationTime(row.waterlevel_datetime);
+      return {...row,lat,lon,level,time,km:distanceKm(here.lat,here.lon,lat,lon)};
+    }).filter(row=>Number.isFinite(row.km) && Number.isFinite(row.level) &&
+      Number.isFinite(row.time) && row.time<=Date.now()+10*60*1000 && Date.now()-row.time<=3*3600*1000)
+      .sort((a,b)=>a.km-b.km);
+    if(request!==waterRequest) return;
+    const row=stations[0];
+    if(!row || row.km>50){
+      setWaterSignal('', 'ไม่พบสถานีที่มีข้อมูลใหม่ใกล้พื้นที่', 'ไม่มีข้อมูล ThaiWater ภายใน 50 กม. ในช่วง 3 ชั่วโมงล่าสุด • ยังบอกสถานะไม่ได้');
+      return;
+    }
+    const st=row.station, bank=finiteNumber(st.min_bank), ground=finiteNumber(st.ground_level);
+    const bankValid=Number.isFinite(bank) && Number.isFinite(ground) && bank>ground;
+    const ratio=bankValid ? (row.level-ground)/(bank-ground) : NaN;
+    let color='', title='ยังประเมินระดับตลิ่งไม่ได้';
+    if(bankValid){
+      if(row.level>=bank){ color='red'; title='น้ำถึง/ล้นตลิ่งที่สถานี'; }
+      else if(ratio>=0.9){ color='orange'; title='ระดับน้ำใกล้ตลิ่งที่สถานี'; }
+      else if(ratio>=0.75){ color='yellow'; title='เฝ้าระวังระดับน้ำที่สถานี'; }
+      else { color='green'; title='ระดับน้ำต่ำกว่าเกณฑ์เฝ้าระวังที่สถานี'; }
+    }
+    const previous=finiteNumber(row.waterlevel_msl_previous);
+    const delta=Number.isFinite(previous) ? (row.level-previous)*100 : NaN;
+    const name=st.tele_station_name?.th || st.tele_station_oldcode || 'ไม่ระบุชื่อ';
+    const detail=name+' ('+(st.tele_station_oldcode||'ไม่มีรหัส')+') • ห่าง '+row.km.toFixed(1)+' กม.'+
+      (bankValid ? ' • ตลิ่ง '+bank.toFixed(2)+' ม. รทก.' : ' • ไม่มีระดับตลิ่งที่ใช้เทียบได้')+
+      (water.cached ? ' • '+(water.published?'ข้อมูลเว็บอัปเดตเมื่อ ':'ข้อมูลที่บันทึกไว้เมื่อ ')+areaTime(new Date(water.at))+(water.limited?' (รอ ThaiWater เปิดให้เรียกใหม่)':'') : '');
+    setWaterSignal(water.limited?'':color,water.limited?'ข้อมูลน้ำที่บันทึกไว้ • ยังไม่อัปเดต':title,
+      detail,row.level.toFixed(2)+' ม. รทก.',waterTrendText(delta),row.waterlevel_datetime+' น. (ไทย)');
+  }
+
+  async function fetchFranceVigilance(){
+    if(franceVigiCache && Date.now()-franceVigiAt<10*60*1000) return franceVigiCache;
+    const r=await fetch('https://www.vigicrues.gouv.fr/services/1/InfoVigiCru.geojson',{cache:'no-store',signal:AbortSignal.timeout(15000)});
+    if(!r.ok) throw new Error('Vigicrues '+r.status);
+    franceVigiCache=await r.json(); franceVigiAt=Date.now();
+    return franceVigiCache;
+  }
+
+  function minGeoDistanceKm(coords,lat,lon,best=Infinity){
+    if(!Array.isArray(coords)) return best;
+    if(coords.length>=2 && Number.isFinite(Number(coords[0])) && Number.isFinite(Number(coords[1])))
+      return Math.min(best,distanceKm(lat,lon,Number(coords[1]),Number(coords[0])));
+    for(const c of coords){
+      best=minGeoDistanceKm(c,lat,lon,best);
+      if(best<0.5) break;
+    }
+    return best;
+  }
+
+  async function loadFranceWater(request,here){
+    setWaterUi('fr');
+    setWaterSignal('', 'กำลังโหลดข้อมูลน้ำฝรั่งเศส…', 'ค้นหาสถานี Hub’Eau และระดับเฝ้าระวัง Vigicrues');
+    const stationUrl=new URL('https://hubeau.eaufrance.fr/api/v2/hydrometrie/referentiel/stations');
+    stationUrl.searchParams.set('latitude',here.lat); stationUrl.searchParams.set('longitude',here.lon);
+    stationUrl.searchParams.set('distance','50'); stationUrl.searchParams.set('en_service','true');
+    stationUrl.searchParams.set('format','json'); stationUrl.searchParams.set('size','50');
+    const [stationRes,vigiResult]=await Promise.all([
+      fetch(stationUrl,{cache:'no-store',signal:AbortSignal.timeout(15000)}),
+      fetchFranceVigilance().catch(e=>{console.warn('Vigicrues:',e);return null;})
+    ]);
+    if(!stationRes.ok) throw new Error('Hub’Eau stations '+stationRes.status);
+    const sj=await stationRes.json();
+    const stations=(sj.data||[]).map(st=>({
+      ...st, lat:Number(st.latitude_station), lon:Number(st.longitude_station),
+      km:distanceKm(here.lat,here.lon,Number(st.latitude_station),Number(st.longitude_station))
+    })).filter(st=>Number.isFinite(st.lat)&&Number.isFinite(st.lon)&&Number.isFinite(st.km)).sort((a,b)=>a.km-b.km);
+    const st=stations[0];
+    if(request!==waterRequest) return;
+
+    let vigi=null;
+    if(vigiResult?.features?.length){
+      vigi=vigiResult.features.map(f=>({
+        feature:f, km:minGeoDistanceKm(f.geometry?.coordinates,here.lat,here.lon),
+        level:Number(f.properties?.NivInfViCr)
+      })).filter(x=>Number.isFinite(x.km)&&Number.isFinite(x.level)).sort((a,b)=>a.km-b.km)[0]||null;
+      if(vigi && vigi.km>30) vigi=null;
+    }
+    const colorMap={1:'green',2:'yellow',3:'orange',4:'red'};
+    const titleMap={1:'Vigicrues: ไม่มีระดับเฝ้าระวังพิเศษ',2:'Vigicrues: เฝ้าระวังน้ำหลาก',3:'Vigicrues: เฝ้าระวังระดับสูง',4:'Vigicrues: เฝ้าระวังระดับรุนแรง'};
+    const vigiColor=vigi?colorMap[vigi.level]||'':'';
+    const vigiTitle=vigi?titleMap[vigi.level]||'มีข้อมูล Vigicrues ใกล้พื้นที่':'ยังไม่พบเส้นทางน้ำ Vigicrues ใกล้พิกัด';
+
+    if(!st){
+      setWaterSignal(vigiColor,vigiTitle,'ไม่พบสถานี Hub’Eau ภายใน 50 กม.'+(vigi?' • ช่วงเฝ้าระวัง '+(vigi.feature.properties?.lbentcru||'ไม่ระบุ')+' ห่างประมาณ '+vigi.km.toFixed(1)+' กม.':''));
+      return;
+    }
+    const obsUrl=new URL('https://hubeau.eaufrance.fr/api/v2/hydrometrie/observations_tr');
+    obsUrl.searchParams.set('code_entite',st.code_station); obsUrl.searchParams.set('grandeur_hydro','H');
+    obsUrl.searchParams.set('sort','desc'); obsUrl.searchParams.set('size','6'); obsUrl.searchParams.set('format','json');
+    const or=await fetch(obsUrl,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+    if(!or.ok) throw new Error('Hub’Eau observations '+or.status);
+    const oj=await or.json();
+    const obs=(oj.data||[]).filter(x=>x.code_station===st.code_station && Number.isFinite(Number(x.resultat_obs)))
+      .sort((a,b)=>Date.parse(b.date_obs)-Date.parse(a.date_obs));
+    if(request!==waterRequest) return;
+    if(!obs.length){
+      setWaterSignal(vigiColor,vigiTitle,(st.libelle_station||st.libelle_site||st.code_station)+' • ห่าง '+st.km.toFixed(1)+' กม. • สถานีไม่มีค่าระดับน้ำล่าสุด');
+      return;
+    }
+    const current=obs[0],previous=obs[1];
+    const levelM=Number(current.resultat_obs)/1000; // Hub'Eau H is millimetres.
+    const deltaCm=previous ? (Number(current.resultat_obs)-Number(previous.resultat_obs))/10 : NaN;
+    const river=st.libelle_cours_eau?(' • '+st.libelle_cours_eau):'';
+    const vigiDetail=vigi?(' • Vigicrues '+(vigi.feature.properties?.lbentcru||'')+' ('+vigi.km.toFixed(1)+' กม.)'):'';
+    setWaterSignal(vigiColor,vigiTitle,(st.libelle_station||st.libelle_site||st.code_station)+river+' • สถานีห่าง '+st.km.toFixed(1)+' กม.'+vigiDetail,
+      levelM.toFixed(2)+' ม.',waterTrendText(deltaCm),new Date(current.date_obs).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Paris'}));
+  }
+
+  function median(values){
+    const a=values.filter(Number.isFinite).sort((x,y)=>x-y); if(!a.length) return NaN;
+    const m=Math.floor(a.length/2); return a.length%2?a[m]:(a[m-1]+a[m])/2;
+  }
+
+  async function loadUaeWater(request,here){
+    setWaterUi('ae');
+    setWaterSignal('', 'กำลังประเมินสัญญาณน้ำหลาก…', 'ใช้ GloFAS + พยากรณ์ฝนสำหรับ UAE');
+    const floodUrl=new URL('https://flood-api.open-meteo.com/v1/flood');
+    floodUrl.searchParams.set('latitude',here.lat); floodUrl.searchParams.set('longitude',here.lon);
+    floodUrl.searchParams.set('daily','river_discharge'); floodUrl.searchParams.set('past_days','14'); floodUrl.searchParams.set('forecast_days','7');
+    const weatherUrl=new URL('https://api.open-meteo.com/v1/forecast');
+    weatherUrl.searchParams.set('latitude',here.lat); weatherUrl.searchParams.set('longitude',here.lon);
+    weatherUrl.searchParams.set('timezone','auto'); weatherUrl.searchParams.set('forecast_days','3');
+    weatherUrl.searchParams.set('daily','precipitation_sum,precipitation_probability_max');
+    const [fr,wr]=await Promise.all([
+      fetch(floodUrl,{cache:'no-store',signal:AbortSignal.timeout(15000)}),
+      fetch(weatherUrl,{cache:'no-store',signal:AbortSignal.timeout(15000)})
+    ]);
+    if(!fr.ok) throw new Error('Open-Meteo Flood '+fr.status);
+    if(!wr.ok) throw new Error('Open-Meteo Weather '+wr.status);
+    const fd=await fr.json(),wd=await wr.json();
+    if(request!==waterRequest) return;
+    const times=fd.daily?.time||[],flows=(fd.daily?.river_discharge||[]).map(Number);
+    const todayIso=new Date().toISOString().slice(0,10);
+    let todayIndex=times.indexOf(todayIso); if(todayIndex<0) todayIndex=Math.max(0,times.length-7);
+    const current=Number(flows[todayIndex]);
+    const past=flows.slice(Math.max(0,todayIndex-14),todayIndex).filter(Number.isFinite);
+    const future=flows.slice(todayIndex,Math.min(flows.length,todayIndex+3)).filter(Number.isFinite);
+    const base=median(past),peak=future.length?Math.max(...future):current;
+    const ratio=Number.isFinite(base)&&base>0.05&&Number.isFinite(peak)?peak/base:NaN;
+    const rain=(wd.daily?.precipitation_sum||[]).map(Number);
+    const rain24=rain.filter(Number.isFinite).slice(0,2).length?Math.max(...rain.filter(Number.isFinite).slice(0,2)):0;
+    const rainProb=Math.max(0,...(wd.daily?.precipitation_probability_max||[]).slice(0,2).map(x=>Number(x)||0));
+    let color='green',title='แบบจำลองยังไม่เห็นสัญญาณน้ำหลากเด่น';
+    if(rain24>=75 || (Number.isFinite(ratio)&&ratio>=8&&peak>=5)){color='red';title='แบบจำลองพบสัญญาณน้ำหลากสูงมาก';}
+    else if(rain24>=40 || (Number.isFinite(ratio)&&ratio>=4&&peak>=2)){color='orange';title='แบบจำลองพบสัญญาณน้ำหลากเพิ่มขึ้นมาก';}
+    else if(rain24>=15 || (Number.isFinite(ratio)&&ratio>=2)){color='yellow';title='ควรเฝ้าระวังสัญญาณน้ำหลาก';}
+    const deltaPct=Number.isFinite(current)&&Number.isFinite(future[1])&&Math.abs(current)>0.01?((future[1]-current)/Math.abs(current))*100:NaN;
+    const trend=Number.isFinite(deltaPct)?(deltaPct>5?'↑ เพิ่ม '+Math.round(deltaPct)+'%':deltaPct<-5?'↓ ลด '+Math.abs(Math.round(deltaPct))+'%':'→ ใกล้เคียงวันนี้'):'ข้อมูลแนวโน้มจำกัด';
+    const detail='GloFAS ~5 กม. • ฝนสูงสุด 24 ชม. '+rain24.toFixed(1)+' มม. • โอกาสฝน '+Math.round(rainProb)+'%'+
+      (Number.isFinite(ratio)?' • การไหลสูงสุดราว '+ratio.toFixed(1)+'× ค่ากลาง 14 วัน':' • พื้นที่แห้ง/ไม่มีฐานการไหลพอเทียบ')+' • ไม่ใช่ประกาศเตือนทางการ';
+    setWaterSignal(color,title,detail,Number.isFinite(current)?current.toFixed(2)+' m³/s':'--',trend,times[todayIndex]||'วันนี้');
+  }
+
+  async function loadWater(){
+    if(!locationReady) return;
+    const request=++waterRequest, here={...point}, country=waterCountry(point);
+    try{
+      if(country==='th') return await loadThaiWater(request,here);
+      if(country==='fr') return await loadFranceWater(request,here);
+      if(country==='ae') return await loadUaeWater(request,here);
+      setWaterUi('other');
+      setWaterSignal('', 'ประเทศนี้ยังไม่ได้เชื่อมข้อมูลน้ำเฉพาะพื้นที่', 'ขณะนี้รองรับสถานะน้ำสำหรับไทย ฝรั่งเศส และสหรัฐอาหรับเอมิเรตส์');
+    }catch(e){
+      if(request!==waterRequest) return;
+      console.error('Water data:',e);
+      const provider=country==='fr'?'Hub’Eau / Vigicrues':country==='ae'?'Open‑Meteo Flood':country==='th'?'ThaiWater':'แหล่งข้อมูลน้ำ';
+      setWaterSignal('', country==='th'&&e.rateLimited?'ThaiWater จำกัดการเรียกข้อมูลน้ำ':'โหลดข้อมูลน้ำไม่ได้',
+        (e.rateLimited?e.message:'การเชื่อมต่อ '+provider+': '+waterError(e))+' • ระบบจะลองใหม่ตามรอบ');
+    }
+  }
+
+  function updateSignal(d){
+    const now=Date.now()/1000, end=now+3600;
+    const h=d.hourly;
+    // Hourly precipitation is the total for the preceding hour; include every interval overlapping now..+1h.
+    const indices=h.time.map((t,i)=>({t,i})).filter(x=>x.t>now && x.t-3600<end).map(x=>x.i);
+    const valid=indices.length && h.time[indices[indices.length-1]]>=end && indices.every(i=>
+      Number.isFinite(h.precipitation_probability?.[i]) && Number.isFinite(h.precipitation?.[i]) && Number.isFinite(h.weather_code?.[i]));
+    if(!valid) return setSignal('', 'ข้อมูลฝน 1 ชั่วโมงยังไม่ครบ', 'ยังประเมินไม่ได้ • '+point.name);
+    const threshold=Math.min(100,Math.max(10,Number($('threshold').value)||60));
+    const prob=Math.max(...indices.map(i=>h.precipitation_probability[i]));
+    const wet=indices.some(i=>h.precipitation[i]>=0.1 || h.precipitation_probability[i]>=threshold || [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99].includes(h.weather_code[i]));
+    setSignal(wet?'red':'green',wet?'มีแนวโน้มฝนใน 1 ชั่วโมง':'คาดว่าไม่มีฝนใน 1 ชั่วโมง',
+      point.name+' • โอกาสฝนสูงสุด '+Math.round(prob)+'% • เป็นค่าพยากรณ์ ไม่ใช่การยืนยัน');
+  }
+  async function loadForecast(){
+    if(!locationReady) return;
+    const request=++forecastRequest;
+    setSignal('', 'กำลังอัปเดตพยากรณ์…',point.name);
+    try{
+      const url = new URL('https://api.open-meteo.com/v1/forecast');
+      url.searchParams.set('latitude', point.lat);
+      url.searchParams.set('longitude', point.lon);
+      url.searchParams.set('timezone','auto');
+      url.searchParams.set('forecast_hours','4');
+      url.searchParams.set('timeformat','unixtime');
+      url.searchParams.set('hourly','precipitation_probability,precipitation,wind_gusts_10m,cape,weather_code');
+      const r = await fetch(url, {signal:AbortSignal.timeout(20000)});
+      if(!r.ok) throw new Error('Open-Meteo '+r.status);
+      const d = await r.json();
+      if(request!==forecastRequest) return;
+      if(!d.hourly?.time?.length) throw new Error("ไม่มีข้อมูลพยากรณ์");
+      setActiveTimeZone(d.timezone || activeTimeZone);
+      lastForecast={data:d,at:Date.now()};
+      updateSignal(d);
+
+      const times = d.hourly?.time || [];
+      const probs = d.hourly?.precipitation_probability || [];
+      const rain = d.hourly?.precipitation || [];
+      const gust = d.hourly?.wind_gusts_10m || [];
+      const cape = d.hourly?.cape || [];
+      const wcode = d.hourly?.weather_code || [];
+      const now = Date.now();
+      let idx = times.findIndex(t => t*1000 >= now - 30*60*1000);
+      if(idx < 0) idx = 0;
+      const n = Math.min(3, times.length-idx);
+      const rows = [];
+      for(let j=0;j<n;j++){
+        const k=idx+j;
+        rows.push({
+          t:times[k],
+          p:Number(probs[k] ?? 0),
+          mm:Number(rain[k] ?? 0),
+          g:Number(gust[k] ?? 0),
+          cape:Number(cape[k] ?? 0),
+          w:Number(wcode[k] ?? 0)
+        });
+      }
+      const relevant = rows.slice(0,2);
+      const maxP = relevant.length ? Math.max(...relevant.map(x=>x.p)) : 0;
+      const sum = relevant.reduce((a,x)=>a+x.mm,0);
+      const maxG = relevant.length ? Math.max(...relevant.map(x=>x.g)) : 0;
+      const maxCape = relevant.length ? Math.max(...relevant.map(x=>x.cape)) : 0;
+
+      // ค่าประเมิน "พายุฝนฟ้าคะนอง" เป็นดัชนีช่วยตัดสินใจ ไม่ใช่ probability ทางการจากหน่วยงานรัฐ
+      // ใช้การผสมของ CAPE + โอกาสฝน + ลมกระโชก + WMO weather code (95/96/99 = thunderstorm)
+      let stormScore = 0;
+      if (maxCape >= 2500) stormScore += 45;
+      else if (maxCape >= 1500) stormScore += 35;
+      else if (maxCape >= 800) stormScore += 25;
+      else if (maxCape >= 300) stormScore += 12;
+
+      stormScore += Math.min(30, maxP * 0.30);
+
+      if (maxG >= 70) stormScore += 20;
+      else if (maxG >= 50) stormScore += 14;
+      else if (maxG >= 35) stormScore += 7;
+
+      if (relevant.some(x => [95,96,99].includes(x.w))) stormScore = Math.max(stormScore, 80);
+
+      const stormProb = Math.max(0, Math.min(95, Math.round(stormScore)));
+
+      $('rainProb').textContent = Math.round(maxP)+'%';
+      $('stormProb').textContent = stormProb+'%';
+      $('capeMax').textContent = Math.round(maxCape)+' J/kg';
+      $('rainSum').textContent = sum.toFixed(1)+' มม.';
+      $('forecastUpdated').textContent = areaTime(new Date());
+      $('forecast').innerHTML = rows.map(x => `<div class="slot">${areaTime(new Date(x.t*1000))}<b>${Math.round(x.p)}%</b>${x.mm.toFixed(1)} มม.<br><span class="small">${Math.round(x.g)} กม./ชม.</span></div>`).join('');
+
+      const threshold = Number($('threshold').value || 60);
+      const v = $('verdict');
+      v.className='verdict';
+      let title='ยังไม่ถึงเกณฑ์ที่ตั้ง', sub=`ช่วงประมาณ 2 ชั่วโมงข้างหน้า ฝนสูงสุด ${Math.round(maxP)}% • พายุฝนฟ้าคะนอง ${stormProb}%`;
+      if(maxP >= 80 || sum >= 10 || maxG >= 60 || stormProb >= 75){
+        v.classList.add('danger'); title='ควรเฝ้าระวังใกล้ชิด'; sub=`ฝน ${Math.round(maxP)}% • พายุฝนฟ้าคะนอง ${stormProb}% • ${sum.toFixed(1)} มม. • ลมกระโชก ${Math.round(maxG)} กม./ชม.`;
+      } else if(maxP >= threshold || sum >= 2 || maxG >= 40 || stormProb >= 45){
+        v.classList.add('warn'); title='มีแนวโน้มฝน/พายุเพิ่มขึ้น'; sub=`ฝน ${Math.round(maxP)}% • พายุฝนฟ้าคะนอง ${stormProb}% • ${sum.toFixed(1)} มม. • ลมกระโชก ${Math.round(maxG)} กม./ชม.`;
+      }
+      v.innerHTML=`<div class="big">${title}</div><div class="small">${sub}</div>`;
+
+      if(maxP >= threshold && 'Notification' in window && Notification.permission === 'granted'){
+        const key='fonmai-last-alert';
+        const last=Number(localStorage.getItem(key)||0);
+        if(Date.now()-last > 45*60*1000){
+          new Notification('เก็บผ้าทันไหม๊', {body:`${point.name}: โอกาสฝนสูงสุดราว ${Math.round(maxP)}% ใน 2 ชั่วโมงข้างหน้า`});
+          localStorage.setItem(key, Date.now());
+        }
+      }
+    }catch(e){
+      if(request!==forecastRequest) return;
+      lastForecast=null;
+      setSignal('', 'ยังประเมินฝนไม่ได้', 'โหลดพยากรณ์ไม่สำเร็จ • ลองใหม่อีกครั้ง');
+      console.error(e);
+      $('verdict').innerHTML='<div class="big">โหลดพยากรณ์ไม่สำเร็จ</div><div class="small">ลองรีเฟรชหน้าอีกครั้ง</div>';
+      setStatus('พยากรณ์โหลดไม่สำเร็จ', false);
+    }
+  }
+
+  async function refreshAll(){
+    await Promise.all([loadRadar(), loadForecast(), loadWater()]);
+  }
+
+  $('timeline').addEventListener('input', e => { stopPlay(); showRadarFrame(Number(e.target.value)); });
+  $('playBtn').addEventListener('click', () => playing ? stopPlay() : startPlay());
+  $('threshold').addEventListener('change', loadForecast);
+  $('notifyBtn').addEventListener('click', async ()=>{
+    if(!('Notification' in window)) return alert('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน');
+    const p = await Notification.requestPermission();
+    $('notifyBtn').textContent = p==='granted' ? '✓ เปิดแล้ว' : 'เปิดแจ้งเตือน';
+  });
+
+  function setMapPicking(active){
+    pickingMap=active;
+    $('mapPickBtn').classList.toggle('active',active);
+    $('mapPickBtn').textContent=active?'ยกเลิกเลือกจุด':'◎ เลือกจุดบนแผนที่';
+    document.querySelector('.mapwrap').classList.toggle('picking',active);
+    if(active) $('locationStatus').textContent='คลิกตำแหน่งที่ต้องการบนแผนที่ แล้วระบบจะอัปเดตฝนและน้ำ';
+  }
+  function showPoint(next, status){
+    point=next; locationReady=true; lastForecast=null;
+    $('placeName').textContent=point.name;
+    $('locationStatus').textContent=status;
+    $('manualLat').value=point.lat.toFixed(5);
+    $('manualLon').value=point.lon.toFixed(5);
+    marker?.setLngLat([point.lon,point.lat]);
+    map?.flyTo({center:[point.lon,point.lat],zoom:9});
+    $('verdict').textContent='กำลังพยากรณ์ตามตำแหน่งใหม่…';
+    ['rainProb','stormProb','rainSum','capeMax','forecastUpdated'].forEach(id=>$(id).textContent='--');
+    $('forecast').textContent='';
+    loadForecast(); loadWater();
+  }
+  function chooseManual(lat,lon,name){
+    if(!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat)>90 || Math.abs(lon)>180){
+      $('locationStatus').textContent='พิกัดไม่ถูกต้อง: ละติจูด -90 ถึง 90, ลองจิจูด -180 ถึง 180';
+      return;
+    }
+    ++gpsSession;
+    if(gpsWatch!==null){navigator.geolocation?.clearWatch(gpsWatch);gpsWatch=null;}
+    $('locateBtn').disabled=false; $('locateBtn').textContent='◎ ตำแหน่งฉัน';
+    setMapPicking(false);
+    const next={lat,lon,name};
+    manualLocation=true;
+    try{localStorage.setItem(MANUAL_LOCATION_KEY,JSON.stringify(next));}catch(e){console.warn('บันทึกพิกัดไม่ได้',e);}
+    showPoint(next,'ใช้พิกัดที่เลือกเอง • ระบบจะจำจุดนี้เมื่อเปิดหน้าอีกครั้ง • กดตำแหน่งฉันเพื่อกลับไปใช้ GPS');
+  }
+  $('mapPickBtn').addEventListener('click',()=>setMapPicking(!pickingMap));
+  $('manualApplyBtn').addEventListener('click',()=>{
+    const lat=Number($('manualLat').value),lon=Number($('manualLon').value);
+    if(!$('manualLat').value.trim() || !$('manualLon').value.trim()){
+      $('locationStatus').textContent='กรอกละติจูดและลองจิจูดให้ครบก่อน';return;
+    }
+    chooseManual(lat,lon,`พิกัดที่เลือก ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+  });
+  function locate(){
+    const session=++gpsSession;
+    if(gpsWatch!==null){navigator.geolocation?.clearWatch(gpsWatch);gpsWatch=null;}
+    setMapPicking(false);
+    $('locateBtn').disabled=true; $('locateBtn').textContent='กำลังหา…';
+    $('locationStatus').textContent='กำลังขอตำแหน่ง GPS • โปรดกดอนุญาต';
+    const finish=()=>{ $('locateBtn').disabled=false; $('locateBtn').textContent='◎ ตำแหน่งฉัน'; };
+    const failure=err=>{
+      if(session!==gpsSession) return;
+      finish();
+      $('locationStatus').textContent=(err.code===1?'ไม่ได้รับอนุญาต GPS': 'หาตำแหน่ง GPS ไม่สำเร็จ')+
+        ' • '+(locationReady?'ใช้ตำแหน่งล่าสุดที่แสดง':'ใช้พิษณุโลกเป็นพื้นที่สำรอง')+' • กดตำแหน่งฉันเพื่อลองใหม่ (เปิดผ่าน HTTPS)';
+      if(!locationReady) showPoint({...DEFAULT,name:'พิษณุโลก (สำรอง — ไม่มี GPS)'},$('locationStatus').textContent);
+    };
+    if(!navigator.geolocation || !window.isSecureContext){ failure({code:2}); return; }
+    gpsWatch=navigator.geolocation.watchPosition(pos=>{
+      if(session!==gpsSession) return;
+      finish();
+      const lat=pos.coords.latitude, lon=pos.coords.longitude;
+      const changed=!locationReady || Math.abs(point.lat-lat)>0.001 || Math.abs(point.lon-lon)>0.001 || point.name!=='ตำแหน่ง GPS ปัจจุบัน';
+      $('locationStatus').textContent=`GPS ${lat.toFixed(5)}, ${lon.toFixed(5)} • ความแม่นยำประมาณ ${Math.round(pos.coords.accuracy)} เมตร`;
+      if(!changed) return;
+      manualLocation=false;
+      try{localStorage.removeItem(MANUAL_LOCATION_KEY);}catch(e){console.warn('ล้างพิกัดไม่ได้',e);}
+      showPoint({lat,lon,name:'ตำแหน่ง GPS ปัจจุบัน'},$('locationStatus').textContent);
+    },failure,{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  }
+  $('locateBtn').addEventListener('click',locate);
+  $('stormEscapeBtn').addEventListener('click',event=>{
+    event.preventDefault();
+    const url=new URL('storm-escape.html',window.location.href);
+    if(locationReady && Number.isFinite(point.lat) && Number.isFinite(point.lon)){
+      url.searchParams.set('lat',point.lat.toFixed(6));
+      url.searchParams.set('lon',point.lon.toFixed(6));
+      url.searchParams.set('name',point.name||'ตำแหน่งที่เลือก');
+    }
+    window.location.href=url.href;
+  });
+  initMap();
+  map?.on('click',event=>{
+    if(pickingMap) chooseManual(event.lngLat.lat,event.lngLat.lng,
+      `พิกัดที่เลือก ${event.lngLat.lat.toFixed(4)}, ${event.lngLat.lng.toFixed(4)}`);
+  });
+  let savedPoint=null;
+  try{savedPoint=JSON.parse(localStorage.getItem(MANUAL_LOCATION_KEY));}catch(e){console.warn('อ่านพิกัดที่บันทึกไม่ได้',e);}
+  if(savedPoint && Number.isFinite(savedPoint.lat) && Number.isFinite(savedPoint.lon) &&
+    Math.abs(savedPoint.lat)<=90 && Math.abs(savedPoint.lon)<=180){
+    manualLocation=true;
+    showPoint(savedPoint,'ใช้พิกัดที่เลือกเองและบันทึกไว้ • กดตำแหน่งฉันเพื่อกลับไปใช้ GPS');
+  }else locate();
+  updateLocalClock();
+  setInterval(updateLocalClock,1000);
+  setInterval(refreshAll, REFRESH_MS);
+  setInterval(()=>{
+    if(lastForecast){
+      if(Date.now()-lastForecast.at>15*60*1000) setSignal('', 'ข้อมูลพยากรณ์เก่าแล้ว', 'รออัปเดตก่อนประเมินฝนอีกครั้ง');
+      else updateSignal(lastForecast.data);
+    }
+  },30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(!manualLocation) locate();refreshAll();}});
+})();
+</script>
+</body>
+</html>
